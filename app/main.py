@@ -1,7 +1,9 @@
 import asyncio
+import os
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 import time
 import uvicorn
 
@@ -34,6 +36,14 @@ app.include_router(voice.router, prefix="/api")
 app.include_router(audio.router, prefix="/api")
 app.include_router(text.router, prefix="/api")
 app.include_router(websocket.router)
+
+# 挂载静态文件
+# 获取项目根目录
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+static_dir = os.path.join(root_dir, 'static')
+
+# 添加静态文件支持
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # 异常处理
 @app.exception_handler(APIError)
