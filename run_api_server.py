@@ -13,13 +13,21 @@ logger = logging.getLogger(__name__)
 
 def run_api_server():
     """运行 API 服务器"""
-    # 确保使用项目根目录的虚拟环境
-    venv_path = Path(".venv/bin/python")
-    if not venv_path.exists():
-        logger.warning("未找到虚拟环境，使用系统Python")
-        python_cmd = "python3.11.11"
+    # 检查环境
+    # 首先检查是否在 conda 环境中
+    conda_prefix = os.environ.get("CONDA_PREFIX")
+    if conda_prefix and "voice" in conda_prefix:
+        logger.info(f"检测到 conda 环境: {conda_prefix}")
+        python_cmd = "python"  # conda 激活后直接使用 python 命令
     else:
-        python_cmd = str(venv_path)
+        # 检查项目根目录的虚拟环境
+        venv_path = Path(".venv/bin/python")
+        if venv_path.exists():
+            logger.info(f"使用项目虚拟环境: {venv_path}")
+            python_cmd = str(venv_path)
+        else:
+            logger.warning("未找到虚拟环境，使用系统 Python")
+            python_cmd = "python3.11"
     
     # 加载环境变量
     env_path = Path(".env")
