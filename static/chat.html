@@ -538,6 +538,10 @@
         // 开始录音
         async function startRecording() {
             try {
+                // 显示正在请求权限的状态
+                statusElement.textContent = "正在请求麦克风权限...";
+                
+                // 请求麦克风权限
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 
                 // 设置音频上下文和分析器
@@ -580,7 +584,23 @@
                 
             } catch (error) {
                 console.error('无法访问麦克风:', error);
-                statusElement.textContent = "无法访问麦克风，请检查权限";
+                
+                // 显示更友好的错误提示
+                let errorMessage = "无法访问麦克风";
+                
+                if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+                    errorMessage = "麦克风权限被拒绝。请点击浏览器地址栏中的锁图标，允许麦克风访问。";
+                    
+                    // 添加一个指导消息
+                    addMessage("看起来浏览器阻止了麦克风访问。请点击地址栏中的锁图标，然后允许麦克风访问。完成后再次点击麦克风按钮。", "ai");
+                    
+                } else if (error.name === "NotFoundError") {
+                    errorMessage = "未检测到麦克风设备。请确保您的麦克风已正确连接。";
+                } else if (error.name === "SecurityError") {
+                    errorMessage = "由于安全限制，无法访问麦克风。请使用 HTTPS 或 localhost 访问。";
+                }
+                
+                statusElement.textContent = errorMessage;
             }
         }
         

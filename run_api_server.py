@@ -2,6 +2,7 @@ import os
 import sys
 import subprocess
 import logging
+import uvicorn
 from pathlib import Path
 
 # 配置日志
@@ -42,19 +43,40 @@ def run_api_server():
     
     # 运行 API 服务器
     logger.info("启动 API 服务器...")
-    cmd = [python_cmd, "-m", "app.main"]
+    
+    # 从环境变量获取主机和端口
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "8000"))
+    
+    # 检查是否存在证书文件
+    cert_file = Path("cert.pem")
+    key_file = Path("key.pem")
     
     try:
-        # 使用 subprocess 运行命令
-        process = subprocess.run(
-            cmd,
-            check=True,
-            text=True,
-        )
-        return process.returncode
-    except subprocess.CalledProcessError as e:
+        if cert_file.exists() and key_file.exists():
+            # 使用 HTTPS
+            logger.info("检测到 SSL 证书，启用 HTTPS")
+            uvicorn.run(
+                "app.main:app",
+                host=host,
+                port=port,
+                reload=False,
+                ssl_keyfile=str(key_file),
+                ssl_certfile=str(cert_file),
+            )
+        else:
+            # 使用 HTTP
+            logger.info("未检测到 SSL 证书，使用 HTTP")
+            uvicorn.run(
+                "app.main:app",
+                host=host,
+                port=port,
+                reload=False,
+            )
+        return 0
+    except Exception as e:
         logger.error(f"运行 API 服务器时出错: {e}")
-        return e.returncode
+        return 1
     except KeyboardInterrupt:
         logger.info("收到中断信号，正在关闭...")
         return 0
