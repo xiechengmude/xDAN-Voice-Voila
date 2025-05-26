@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voila 全双工音频聊天</title>
+    <style>
+        body {
+            font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h1 {
+            color: #ca00f9;
+            margin-bottom: 10px;
+        }
+        .chat-container {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .chat-messages {
+            height: 300px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #eee;
+            border-radius: 5px;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 80%;
+        }
+        .user-message {
+            background-color: #e6f7ff;
+            margin-left: auto;
+            text-align: right;
+        }
+        .ai-message {
+            background-color: #f0f0f0;
+            margin-right: auto;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .voice-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        button {
+            background-color: #ca00f9;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #a600cc;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .status {
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+        select {
+            padding: 8px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        .voice-upload {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .audio-visualizer {
+            width: 100%;
+            height: 60px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            position: relative;
+            overflow: hidden;
+        }
+        .visualizer-canvas {
+            width: 100%;
+            height: 100%;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            font-size: 12px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Voila 全双工音频聊天</h1>
+            <p>体验实时、自然的语音交互</p>
+        </header>
+
+        <div class="chat-container">
+            <div class="audio-visualizer">
+                <canvas id="visualizer" class="visualizer-canvas"></canvas>
+            </div>
+            
+            <div class="chat-messages" id="messages">
+                <div class="message ai-message">
+                    您好！我是 Voila 语音助手，请点击"开始录音"按钮与我交谈。
+                </div>
+            </div>
+            
+            <div class="controls">
+                <div class="voice-controls">
+                    <button id="recordButton">开始录音</button>
+                    <button id="stopButton" disabled>停止录音</button>
+                    <div class="status" id="status">准备就绪</div>
+                </div>
+                
+                <div class="voice-selection">
+                    <label for="voiceSelect">选择 AI 声音：</label>
+                    <select id="voiceSelect">
+                        <option value="Homer Simpson">Homer Simpson</option>
+                        <option value="Marge Simpson">Marge Simpson</option>
+                        <option value="Bart Simpson">Bart Simpson</option>
+                        <option value="Lisa Simpson">Lisa Simpson</option>
+                        <option value="Custom">自定义声音</option>
+                    </select>
+                </div>
+                
+                <div class="voice-upload" id="voiceUploadContainer" style="display: none;">
+                    <input type="file" id="voiceUpload" accept="audio/*">
+                    <button id="uploadVoiceButton">上传声音</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>基于 Voila 语音-语言基础模型 | xDAN-Voice-Voila 项目</p>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let websocket;
+        let mediaRecorder;
+        let audioContext;
+        let analyser;
+        let visualizerCanvas;
+        let canvasContext;
+        let isRecording = false;
+        let audioChunks = [];
+        
+        // DOM 元素
+        const recordButton = document.getElementById('recordButton');
+        const stopButton = document.getElementById('stopButton');
+        const statusElement = document.getElementById('status');
+        const messagesContainer = document.getElementById('messages');
+        const voiceSelect = document.getElementById('voiceSelect');
+        const voiceUploadContainer = document.getElementById('voiceUploadContainer');
+        const voiceUpload = document.getElementById('voiceUpload');
+        const uploadVoiceButton = document.getElementById('uploadVoiceButton');
+        const visualizer = document.getElementById('visualizer');
+        
+        // 初始化函数
+        function init() {
+            // 初始化可视化器
+            setupVisualizer();
+            
+            // 连接 WebSocket
+            connectWebSocket();
+            
+            // 事件监听器
+            recordButton.addEventListener('click', startRecording);
+            stopButton.addEventListener('click', stopRecording);
+            voiceSelect.addEventListener('change', handleVoiceChange);
+            uploadVoiceButton.addEventListener('click', uploadCustomVoice);
+            
+            // 窗口关闭时清理
+            window.addEventListener('beforeunload', () => {
+                if (websocket) {
+                    websocket.close();
+                }
+                if (mediaRecorder && isRecording) {
+                    mediaRecorder.stop();
+                }
+            });
+        }
+        
+        // 连接 WebSocket
+        function connectWebSocket() {
+            const wsUrl = 'ws://localhost:8765';
+            websocket = new WebSocket(wsUrl);
+            
+            websocket.onopen = () => {
+                statusElement.textContent = '已连接到服务器';
+                recordButton.disabled = false;
+            };
+            
+            websocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'welcome') {
+                    addMessage(data.message, 'ai');
+                } else if (data.type === 'response') {
+                    // 处理文本响应
+                    if (data.data.text) {
+                        addMessage(data.data.text, 'ai');
+                    }
+                    
+                    // 处理音频响应
+                    if (data.data.audio) {
+                        playAudioResponse(data.data.audio);
+                    }
+                }
+            };
+            
+            websocket.onclose = () => {
+                statusElement.textContent = '已断开连接';
+                recordButton.disabled = true;
+                stopButton.disabled = true;
+            };
+            
+            websocket.onerror = (error) => {
+                statusElement.textContent = '连接错误';
+                console.error('WebSocket 错误:', error);
+            };
+        }
+        
+        // 开始录音
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                // 设置音频上下文
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 256;
+                }
+                
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+                
+                // 配置媒体记录器
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                        
+                        // 处理音频数据并发送到服务器
+                        processAudioData(event.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = () => {
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                
+                // 开始录音
+                mediaRecorder.start(100); // 每100ms触发一次ondataavailable事件
+                isRecording = true;
+                
+                // 更新 UI
+                recordButton.disabled = true;
+                stopButton.disabled = false;
+                statusElement.textContent = '正在录音...';
+                
+                // 开始可视化
+                visualize();
+                
+                addMessage('开始录音...', 'user');
+                
+            } catch (error) {
+                console.error('获取麦克风访问权限时出错:', error);
+                statusElement.textContent = '无法访问麦克风';
+            }
+        }
+        
+        // 停止录音
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                isRecording = false;
+                
+                // 更新 UI
+                recordButton.disabled = false;
+                stopButton.disabled = true;
+                statusElement.textContent = '录音已停止';
+                
+                addMessage('录音已停止', 'user');
+                
+                // 通知服务器录音结束
+                if (websocket && websocket.readyState === WebSocket.OPEN) {
+                    websocket.send(JSON.stringify({
+                        type: 'end_recording'
+                    }));
+                }
+            }
+        }
+        
+        // 处理音频数据
+        async function processAudioData(blob) {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                // 将 Blob 转换为 Float32Array
+                const arrayBuffer = await blob.arrayBuffer();
+                const audioData = await audioContext.decodeAudioData(arrayBuffer);
+                const audioBuffer = audioData.getChannelData(0);
+                
+                // 重采样到 16kHz (如果需要)
+                const resampledData = resampleAudio(audioBuffer, audioData.sampleRate, 16000);
+                
+                // 发送到服务器
+                websocket.send(JSON.stringify({
+                    type: 'audio',
+                    data: Array.from(resampledData)
+                }));
+            }
+        }
+        
+        // 音频重采样函数
+        function resampleAudio(audioBuffer, originalSampleRate, targetSampleRate) {
+            if (originalSampleRate === targetSampleRate) {
+                return audioBuffer;
+            }
+            
+            const ratio = targetSampleRate / originalSampleRate;
+            const newLength = Math.round(audioBuffer.length * ratio);
+            const result = new Float32Array(newLength);
+            
+            for (let i = 0; i < newLength; i++) {
+                const originalIndex = Math.floor(i / ratio);
+                result[i] = audioBuffer[originalIndex];
+            }
+            
+            return result;
+        }
+        
+        // 播放音频响应
+        function playAudioResponse(audioData) {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const buffer = audioContext.createBuffer(1, audioData.length, 16000);
+            const channelData = buffer.getChannelData(0);
+            
+            for (let i = 0; i < audioData.length; i++) {
+                channelData[i] = audioData[i];
+            }
+            
+            const source = audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(audioContext.destination);
+            source.start();
+        }
+        
+        // 处理声音选择变化
+        function handleVoiceChange() {
+            const selectedVoice = voiceSelect.value;
+            
+            if (selectedVoice === 'Custom') {
+                voiceUploadContainer.style.display = 'flex';
+            } else {
+                voiceUploadContainer.style.display = 'none';
+                
+                // 发送声音更改请求
+                if (websocket && websocket.readyState === WebSocket.OPEN) {
+                    websocket.send(JSON.stringify({
+                        type: 'change_voice',
+                        voice_name: selectedVoice
+                    }));
+                    
+                    addMessage(`已切换到 ${selectedVoice} 的声音`, 'ai');
+                }
+            }
+        }
+        
+        // 上传自定义声音
+        async function uploadCustomVoice() {
+            const fileInput = voiceUpload;
+            
+            if (fileInput.files.length === 0) {
+                alert('请先选择一个音频文件');
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            
+            reader.onload = async (e) => {
+                const arrayBuffer = e.target.result;
+                
+                // 将文件转换为 Base64
+                const base64Data = arrayBuffer.toString('base64');
+                
+                // 发送到服务器
+                if (websocket && websocket.readyState === WebSocket.OPEN) {
+                    websocket.send(JSON.stringify({
+                        type: 'change_voice',
+                        voice_file: base64Data
+                    }));
+                    
+                    addMessage('已上传自定义声音', 'ai');
+                }
+            };
+            
+            reader.readAsArrayBuffer(file);
+        }
+        
+        // 添加消息到聊天界面
+        function addMessage(text, sender) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message');
+            messageElement.classList.add(sender === 'user' ? 'user-message' : 'ai-message');
+            messageElement.textContent = text;
+            
+            messagesContainer.appendChild(messageElement);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        
+        // 设置音频可视化
+        function setupVisualizer() {
+            visualizerCanvas = visualizer;
+            canvasContext = visualizerCanvas.getContext('2d');
+            
+            // 设置画布大小
+            visualizerCanvas.width = visualizerCanvas.clientWidth;
+            visualizerCanvas.height = visualizerCanvas.clientHeight;
+        }
+        
+        // 可视化音频
+        function visualize() {
+            if (!analyser) return;
+            
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            
+            function draw() {
+                if (!isRecording) return;
+                
+                requestAnimationFrame(draw);
+                
+                analyser.getByteFrequencyData(dataArray);
+                
+                canvasContext.fillStyle = 'rgb(249, 249, 249)';
+                canvasContext.fillRect(0, 0, visualizerCanvas.width, visualizerCanvas.height);
+                
+                const barWidth = (visualizerCanvas.width / bufferLength) * 2.5;
+                let x = 0;
+                
+                for (let i = 0; i < bufferLength; i++) {
+                    const barHeight = dataArray[i] / 2;
+                    
+                    canvasContext.fillStyle = `rgb(${202}, ${0}, ${249})`;
+                    canvasContext.fillRect(x, visualizerCanvas.height - barHeight, barWidth, barHeight);
+                    
+                    x += barWidth + 1;
+                }
+            }
+            
+            draw();
+        }
+        
+        // 页面加载完成后初始化
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
